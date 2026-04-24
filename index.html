@@ -690,11 +690,17 @@ select:hover { border-color: var(--border-hover); }
     </div>
 
     <!-- ===== DETECTION REPORT ===== -->
-    <div class="card" id="detectionCard" style="display:none;">
+    <div class="card" id="detectionCard">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
         <div class="card-title" style="margin-bottom:0;">📋 検知レポート</div>
         <button class="btn" style="font-size:11px;padding:6px 12px;" onclick="clearDetection()">🗑 クリア</button>
       </div>
+      <!-- Waiting state -->
+      <div id="detectionWaiting" style="text-align:center;padding:24px 0;color:var(--text-secondary);font-size:13px;line-height:2;">
+        🎤 マイクをONにして解析を開始すると<br>ここに検知レポートが表示されます
+      </div>
+      <!-- Report content (hidden until detection starts) -->
+      <div id="detectionContent" style="display:none;">
 
       <!-- Pie chart -->
       <div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;flex-wrap:wrap;">
@@ -745,6 +751,7 @@ select:hover { border-color: var(--border-hover); }
           <p style="font-size:12px;color:var(--muted);">まだ検知されていません</p>
         </div>
       </div>
+      </div><!-- /detectionContent -->
     </div>
 
     <div class="card">
@@ -1739,28 +1746,42 @@ function recordDetection(freq, amp) {
 
 function clearDetection() {
   detectionMap = {};
-  renderDetectionReport();
-  document.getElementById('detectionCard').style.display = 'none';
+  const goodList = document.getElementById('goodList');
+  const harmList = document.getElementById('harmList');
+  if (goodList) goodList.innerHTML = '<p class="det-empty" style="font-size:12px;color:var(--muted);">まだ検知されていません</p>';
+  if (harmList) harmList.innerHTML = '<p class="det-empty" style="font-size:12px;color:var(--muted);">検知されていません ✓</p>';
+  document.getElementById('detectionWaiting').style.display = '';
+  document.getElementById('detectionContent').style.display = 'none';
 }
 
 let detectionRenderThrottle = 0;
 function maybeRenderDetection() {
   const now = Date.now();
-  if (now - detectionRenderThrottle > 1500) { // update every 1.5s
+  if (now - detectionRenderThrottle > 3000) { // update every 3s
     detectionRenderThrottle = now;
     renderDetectionReport();
   }
 }
 
 function renderDetectionReport() {
-  const card = document.getElementById('detectionCard');
+  const waiting = document.getElementById('detectionWaiting');
+  const content = document.getElementById('detectionContent');
   const goods = Object.values(detectionMap).filter(d=>d.type==='good').sort((a,b)=>b.count-a.count);
   const harms = Object.values(detectionMap).filter(d=>d.type==='harm').sort((a,b)=>b.count-a.count);
   const total = goods.length + harms.length;
-  if (total === 0) { card.style.display = 'none'; return; }
-  card.style.display = '';
 
-  // Counts
+  if (total === 0) {
+    // Show waiting message, hide report — NO layout shift (card stays visible)
+    waiting.style.display = '';
+    content.style.display = 'none';
+    return;
+  }
+
+  // Show report, hide waiting message
+  waiting.style.display = 'none';
+  content.style.display = '';
+
+  // Counts — text only
   document.getElementById('totalDetected').textContent = total;
   document.getElementById('goodCount').textContent = goods.length + '件';
   document.getElementById('harmCount').textContent = harms.length + '件';
@@ -1772,43 +1793,49 @@ function renderDetectionReport() {
   document.getElementById('pieGoodPct').textContent = goodPct + '%';
   document.getElementById('pieHarmPct').textContent = harmPct + '%';
   document.getElementById('pieNeutPct').textContent = neutPct + '%';
-
-  // Draw pie
   drawPie(goodPct, harmPct, neutPct);
 
-  // Good list
-  const goodEl = document.getElementById('goodList');
-  if (goods.length === 0) {
-    goodEl.innerHTML = '<p style="font-size:12px;color:var(--muted);">まだ検知されていません</p>';
-  } else {
-    goodEl.innerHTML = goods.map(d=>`
-      <div class="det-item good">
-        <span class="det-hz" style="color:#4fffcf;">${d.data.hz} Hz</span>
-        <div class="det-name">
-          <div style="color:var(--text);margin-bottom:2px;">${d.data.icon} ${d.data.name}</div>
-          <div style="font-size:11px;">${d.data.desc}</div>
-        </div>
-        <span class="det-cnt good">${d.count}回</span>
-      </div>
-    `).join('');
-  }
+  // Diff-update lists
+  updateDetList(document.getElementById('goodList'), goods, 'good');
+  updateDetList(document.getElementById('harmList'), harms, 'harm');
+}
 
-  // Harm list
-  const harmEl = document.getElementById('harmList');
-  if (harms.length === 0) {
-    harmEl.innerHTML = '<p style="font-size:12px;color:var(--muted);">検知されていません ✓</p>';
-  } else {
-    harmEl.innerHTML = harms.map(d=>`
-      <div class="det-item harm">
-        <span class="det-hz" style="color:#ff7eb3;">${d.data.hz} Hz</span>
+// Diff-update a detection list: only add new items or update counts, never rebuild
+function updateDetList(container, items, type) {
+  if (items.length === 0) {
+    if (!container.querySelector('.det-empty')) {
+      container.innerHTML = `<p class="det-empty" style="font-size:12px;color:var(--muted);">${type==='good'?'まだ検知されていません':'検知されていません ✓'}</p>`;
+    }
+    return;
+  }
+  // Remove empty placeholder if present
+  const empty = container.querySelector('.det-empty');
+  if (empty) empty.remove();
+
+  const color = type === 'good' ? '#4fffcf' : '#ff7eb3';
+
+  items.forEach(d => {
+    const key = type + '_' + d.data.hz;
+    let row = container.querySelector(`[data-key="${key}"]`);
+    if (!row) {
+      // Create new row — only runs when a new frequency is first detected
+      row = document.createElement('div');
+      row.className = `det-item ${type}`;
+      row.dataset.key = key;
+      row.innerHTML = `
+        <span class="det-hz" style="color:${color};">${d.data.hz} Hz</span>
         <div class="det-name">
           <div style="color:var(--text);margin-bottom:2px;">${d.data.icon} ${d.data.name}</div>
           <div style="font-size:11px;">${d.data.desc}</div>
         </div>
-        <span class="det-cnt harm">${d.count}回</span>
-      </div>
-    `).join('');
-  }
+        <span class="det-cnt ${type}" data-count></span>
+      `;
+      container.appendChild(row);
+    }
+    // Only update the count text — no DOM flicker
+    const countEl = row.querySelector('[data-count]');
+    if (countEl) countEl.textContent = d.count + '回';
+  });
 }
 
 function drawPie(goodPct, harmPct, neutPct) {
