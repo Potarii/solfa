@@ -265,9 +265,12 @@ select:hover { border-color: var(--border-hover); }
 .solf-match {
   margin-top:14px; padding:12px 16px;
   background:rgba(79,255,207,0.07); border:1px solid rgba(79,255,207,0.25);
-  border-radius:12px; font-size:13px; color:var(--accent2); display:none; line-height:1.6;
+  border-radius:12px; font-size:13px; color:var(--accent2); line-height:1.6;
+  min-height:46px;
+  opacity:0; visibility:hidden;
+  transition: opacity 0.4s ease;
 }
-.solf-match.visible { display:block; }
+.solf-match.visible { opacity:1; visibility:visible; }
 
 /* Presets */
 .preset-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
